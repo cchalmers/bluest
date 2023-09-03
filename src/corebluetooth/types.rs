@@ -486,8 +486,8 @@ impl CBCharacteristic {
         autoreleasepool(move || unsafe { ShareId::from_ptr(msg_send![self, UUID]) })
     }
 
-    pub fn service(&self) -> ShareId<CBService> {
-        autoreleasepool(move || unsafe { ShareId::from_ptr(msg_send![self, service]) })
+    pub fn service(&self) -> Option<ShareId<CBService>> {
+        autoreleasepool(move || unsafe { option_from_ptr(msg_send![self, service]) })
     }
 
     pub fn value(&self) -> Option<ShareId<NSData>> {

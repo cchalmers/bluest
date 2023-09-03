@@ -2,7 +2,7 @@
 
 use futures_util::Stream;
 
-use crate::{sys, AdapterEvent, AdvertisingDevice, Device, DeviceId, Result, Uuid};
+use crate::{sys, AdapterEvent, AdvertisingDevice, Device, DeviceStatus, DeviceId, Result, Uuid};
 
 /// The system's Bluetooth adapter interface.
 ///
@@ -127,5 +127,10 @@ impl Adapter {
     #[inline]
     pub async fn disconnect_device(&self, device: &Device) -> Result<()> {
         self.0.disconnect_device(device).await
+    }
+
+    /// Returns a stream of [`DeviceStatus`] structs which contain the status of the device.
+    pub async fn device_status_stream(&self, device: &Device) -> impl Stream<Item = Result<DeviceStatus>> {
+        self.0.device_status_stream(device).await
     }
 }

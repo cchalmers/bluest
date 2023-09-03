@@ -15,7 +15,7 @@ use super::types::{CBCentralManager, CBManagerAuthorization, CBManagerState, CBU
 use crate::corebluetooth::types::{dispatch_get_global_queue, QOS_CLASS_UTILITY};
 use crate::error::ErrorKind;
 use crate::util::defer;
-use crate::{AdapterEvent, AdvertisementData, AdvertisingDevice, Device, DeviceId, Error, Result, Uuid};
+use crate::{AdapterEvent, AdvertisementData, AdvertisingDevice, Device, DeviceId, DeviceStatus, Error, Result, Uuid};
 
 /// The system's Bluetooth adapter interface.
 ///
@@ -162,12 +162,13 @@ impl AdapterImpl {
     ///
     /// If `services` is not empty, returns advertisements including at least one GATT service with a UUID in
     /// `services`. Otherwise returns all advertisements.
-    pub async fn scan<'a>(&'a self, services: &'a [Uuid]) -> Result<impl Stream<Item = AdvertisingDevice> + 'a> {
-        if self.central.state() != CBManagerState::POWERED_ON {
+    pub async fn scan(&self, services: &[Uuid]) -> Result<impl Stream<Item = AdvertisingDevice>> {
+        let adapter = self.clone();
+        if adapter.central.state() != CBManagerState::POWERED_ON {
             return Err(ErrorKind::AdapterUnavailable.into());
         }
 
-        if self.scanning.swap(true, Ordering::Acquire) {
+        if adapter.scanning.swap(true, Ordering::Acquire) {
             return Err(ErrorKind::AlreadyScanning.into());
         }
 
@@ -176,13 +177,15 @@ impl AdapterImpl {
             NSArray::from_vec(vec)
         });
 
-        let guard = defer(|| {
-            self.central.stop_scan();
-            self.scanning.store(false, Ordering::Release);
+        let guard_adapter = adapter.clone();
+        let guard = defer(move || {
+            guard_adapter.central.stop_scan();
+            guard_adapter.scanning.store(false, Ordering::Release);
         });
 
-        let events = BroadcastStream::new(self.delegate.sender().subscribe())
-            .take_while(|_| ready(self.central.state() == CBManagerState::POWERED_ON))
+        let central = adapter.central.clone();
+        let events = BroadcastStream::new(adapter.delegate.sender().subscribe())
+            .take_while(move |_| ready(central.state() == CBManagerState::POWERED_ON))
             .filter_map(move |x| {
                 let _guard = &guard;
                 ready(match x {
@@ -199,7 +202,7 @@ impl AdapterImpl {
                 })
             });
 
-        self.central
+        adapter.central
             .scan_for_peripherals_with_services(services.as_deref(), None);
 
         Ok(events)
@@ -293,5 +296,34 @@ impl AdapterImpl {
         }
 
         Ok(())
+    }
+
+    /// Status of a stream.
+    pub async fn device_status_stream(&self, device: &Device) -> impl Stream<Item = Result<DeviceStatus>> {
+        let device = device.clone();
+        let events = BroadcastStream::new(self.delegate.sender().subscribe());
+        events
+            .filter_map(move |x| {
+                ready(match x {
+                    Ok(delegates::CentralEvent::Connect { peripheral })
+                        if peripheral == device.0.peripheral =>
+                    {
+                        Some(Ok(DeviceStatus::Connected))
+                    }
+                    Ok(delegates::CentralEvent::Disconnect {
+                        peripheral,
+                        error: None,
+                    }) if peripheral == device.0.peripheral =>
+                    {
+                        Some(Ok(DeviceStatus::Disconnected))
+                    }
+                    Ok(delegates::CentralEvent::Disconnect {
+                        peripheral,
+                        error: Some(err),
+                    }) if peripheral == device.0.peripheral => Some(Err(Error::from_nserror(err))),
+                    Err(err) => Some(Err(Error::from_stream_recv_error(err))),
+                    _ => None,
+                })
+            })
     }
 }

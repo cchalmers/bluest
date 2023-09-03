@@ -47,7 +47,7 @@ fn value_to_slice(val: &NSObject) -> Vec<u8> {
 impl Descriptor {
     pub(super) fn new(descriptor: &CBDescriptor) -> Self {
         let characteristic = descriptor.characteristic();
-        let service = characteristic.service();
+        let service = characteristic.service().expect("service should exist");
         let peripheral = service.peripheral();
         let delegate = peripheral
             .delegate()
@@ -86,7 +86,7 @@ impl DescriptorImpl {
 
     /// Read the value of this descriptor from the device
     pub async fn read(&self) -> Result<Vec<u8>> {
-        let service = self.inner.characteristic().service();
+        let service = self.inner.characteristic().service().expect("service should exist");
         let peripheral = service.peripheral();
         let mut receiver = self.delegate.sender().subscribe();
 
@@ -118,7 +118,10 @@ impl DescriptorImpl {
 
     /// Write the value of this descriptor on the device to `value`
     pub async fn write(&self, value: &[u8]) -> Result<()> {
-        let service = self.inner.characteristic().service();
+        let service = match self.inner.characteristic().service() {
+            Some(service) => service,
+            None => return Err(ErrorKind::NotReady.into()),
+        };
         let peripheral = service.peripheral();
         let mut receiver = self.delegate.sender().subscribe();
 

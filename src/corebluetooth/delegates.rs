@@ -258,9 +258,12 @@ impl ::std::fmt::Debug for PeripheralDelegate {
 impl CentralDelegate {
     pub fn with_sender(sender: tokio::sync::broadcast::Sender<CentralEvent>) -> Option<Id<CentralDelegate>> {
         unsafe {
-            let obj: *mut Self = msg_send![Self::class(), alloc];
-            let obj: *mut Self = msg_send![obj, initWithSender: Box::into_raw(Box::new(sender)).cast::<c_void>()];
-            (!obj.is_null()).then(|| Id::from_retained_ptr(obj))
+            let this: *mut Self = msg_send![Self::class(), alloc];
+            this.as_mut().map(|this| {
+                let obj: &mut Object = msg_send![super(this, class!(NSObject)), init];
+                obj.set_ivar("sender", Box::into_raw(Box::new(sender)).cast::<c_void>());
+                Id::from_retained_ptr(this)
+            })
         }
     }
 
@@ -270,12 +273,6 @@ impl CentralDelegate {
             assert!(!sender.is_null());
             &*(sender.cast::<tokio::sync::broadcast::Sender<CentralEvent>>())
         }
-    }
-
-    extern "C" fn init(this: &mut Object, _sel: Sel, sender: *mut c_void) -> id {
-        let this: &mut Object = unsafe { msg_send![super(this, class!(NSObject)), init] };
-        unsafe { this.set_ivar("sender", sender) };
-        this
     }
 
     extern "C" fn dealloc(this: &mut Object, _sel: Sel) {
@@ -299,6 +296,8 @@ impl CentralDelegate {
     delegate_method!(did_update_state<StateChanged>(central));
 
     extern "C" fn did_connect(this: &mut Object, _sel: Sel, _central: id, peripheral: id) {
+        // print the thread id
+        eprintln!("did_connect: {:?}", std::thread::current().id());
         unsafe {
             let ptr = (*this.get_ivar::<*mut c_void>("sender")).cast::<tokio::sync::broadcast::Sender<CentralEvent>>();
             if !ptr.is_null() {
@@ -389,12 +388,6 @@ impl CentralDelegate {
             cls.add_protocol(Protocol::get("CBCentralManagerDelegate").unwrap());
 
             unsafe {
-                // Initialization
-                cls.add_method(
-                    sel!(initWithSender:),
-                    Self::init as extern "C" fn(&mut Object, Sel, *mut c_void) -> id,
-                );
-
                 // Cleanup
                 cls.add_method(sel!(dealloc), Self::dealloc as extern "C" fn(&mut Object, Sel));
 

@@ -20,7 +20,10 @@ pub struct CharacteristicImpl {
 
 impl Characteristic {
     pub(super) fn new(characteristic: &CBCharacteristic) -> Self {
-        let service = characteristic.service();
+        let service = match characteristic.service() {
+            Some(service) => service,
+            None => panic!("the characteristic should have a service attached"),
+        };
         let peripheral = service.peripheral();
         let delegate = peripheral
             .delegate()
@@ -67,7 +70,10 @@ impl CharacteristicImpl {
 
     /// Read the value of this characteristic from the device
     pub async fn read(&self) -> Result<Vec<u8>> {
-        let service = self.inner.service();
+        let service = match self.inner.service() {
+            Some(service) => service,
+            None => return Err(ErrorKind::NotConnected.into()),
+        };
         let peripheral = service.peripheral();
         let mut receiver = self.delegate.sender().subscribe();
 
@@ -103,7 +109,10 @@ impl CharacteristicImpl {
     /// Write the value of this descriptor on the device to `value` and request the device return a response indicating
     /// a successful write.
     pub async fn write(&self, value: &[u8]) -> Result<()> {
-        let service = self.inner.service();
+        let service = match self.inner.service() {
+            Some(service) => service,
+            None => return Err(ErrorKind::NotConnected.into()),
+        };
         let peripheral = service.peripheral();
         let mut receiver = self.delegate.sender().subscribe();
 
@@ -138,7 +147,11 @@ impl CharacteristicImpl {
     /// Write the value of this descriptor on the device to `value` without requesting a response.
     pub async fn write_without_response(&self, value: &[u8]) {
         let data = INSData::from_vec(value.to_vec());
-        self.inner.service().peripheral().write_characteristic_value(
+        let service = match self.inner.service() {
+            Some(service) => service,
+            None => return,
+        };
+        service.peripheral().write_characteristic_value(
             &self.inner,
             &data,
             CBCharacteristicWriteType::WithoutResponse,
@@ -158,7 +171,10 @@ impl CharacteristicImpl {
             ));
         };
 
-        let service = self.inner.service();
+        let service = match self.inner.service() {
+            Some(service) => service,
+            None => return Err(ErrorKind::NotConnected.into()),
+        };
         let peripheral = service.peripheral();
         let mut receiver = self.delegate.sender().subscribe();
 
@@ -168,7 +184,7 @@ impl CharacteristicImpl {
 
         peripheral.set_notify(&self.inner, true);
         let guard = defer(move || {
-            let peripheral = self.inner.service().peripheral();
+            let peripheral = self.inner.service().expect("no service").peripheral();
             peripheral.set_notify(&self.inner, false);
         });
 
@@ -234,7 +250,7 @@ impl CharacteristicImpl {
 
     /// Discover the descriptors associated with this characteristic.
     pub async fn discover_descriptors(&self) -> Result<Vec<Descriptor>> {
-        let service = self.inner.service();
+        let service = self.inner.service().expect("no service");
         let peripheral = service.peripheral();
         let mut receiver = self.delegate.sender().subscribe();
 
